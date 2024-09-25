@@ -168,6 +168,33 @@ pub fn load_gui_settings() -> GuiSettingsContainer {
     })
 }
 
+pub fn load_global_font(ctx: &egui::Context) {
+    let mut fonts = eframe::egui::FontDefinitions::default();
+
+    // Install my own font (maybe supporting non-latin characters):
+    fonts.font_data.insert(
+        "msyh".to_owned(),
+        eframe::egui::FontData::from_static(include_bytes!("C:\\Windows\\Fonts\\msyh.ttc")),
+    ); // .ttf and .otf supported
+
+    // Put my font first (highest priority):
+    fonts
+        .families
+        .get_mut(&eframe::egui::FontFamily::Proportional)
+        .unwrap()
+        .insert(0, "msyh".to_owned());
+
+    // Put my font as last fallback for monospace:
+    fonts
+        .families
+        .get_mut(&eframe::egui::FontFamily::Monospace)
+        .unwrap()
+        .push("msyh".to_owned());
+
+    // let mut ctx = egui::CtxRef::default();
+    ctx.set_fonts(fonts);
+}
+
 pub struct MyApp {
     connected_to_device: bool,
     command: String,
@@ -176,6 +203,15 @@ pub struct MyApp {
     device_idx: usize,
     serial_devices: SerialDevices,
     plotting_range: usize,
+    empty_freq: String,
+    empty_qv: String,
+    sample_name: String,
+    sample_size: String,
+    sample_freq: String,
+    sample_qv: String,
+    sample_dk: String,
+    sample_df: String,
+    select_cal_path: String,
     plot_serial_display_ratio: f32,
     console: Vec<Print>,
     picked_path: PathBuf,
@@ -238,6 +274,15 @@ impl MyApp {
             send_tx,
             clear_tx,
             plotting_range: usize::MAX,
+            empty_freq: "0".to_string(),
+            empty_qv: "0".to_string(),
+            sample_name: "".to_string(),
+            sample_size: "".to_string(),
+            sample_freq: "0".to_string(),
+            sample_qv: "0".to_string(),
+            sample_dk: "0".to_string(),
+            sample_df: "0".to_string(),
+            select_cal_path: "".to_string(),
             plot_serial_display_ratio: 0.45,
             command: "".to_string(),
             show_sent_cmds: true,
@@ -302,6 +347,7 @@ impl MyApp {
     }
 
     fn draw_central_panel(&mut self, ctx: &egui::Context) {
+        load_global_font(&ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             let left_border = 10.0;
 
@@ -530,7 +576,8 @@ impl MyApp {
                                             let dev_text = dev.replace("/dev/tty.", "");
                                             ui.selectable_value(&mut self.device, dev, dev_text);
                                         });
-                                }).response;
+                                })
+                                .response;
                             // let selected_new_device = response.changed();  //somehow this does not work
                             // if selected_new_device {
                             if old_name != self.device {
@@ -565,11 +612,15 @@ impl MyApp {
                                     device.name = self.device.clone();
                                     self.serial_devices.devices.push(device);
                                     self.serial_devices.number_of_plots.push(1);
-                                    self.serial_devices.labels.push(vec!["Column 0".to_string()]);
+                                    self.serial_devices
+                                        .labels
+                                        .push(vec!["Column 0".to_string()]);
                                     self.device_idx = self.serial_devices.devices.len() - 1;
                                     save_serial_settings(&self.serial_devices);
                                 }
-                                self.clear_tx.send(true).expect("failed to send clear after choosing new device");
+                                self.clear_tx
+                                    .send(true)
+                                    .expect("failed to send clear after choosing new device");
                                 // need to clear the data here such that we don't get errors in the gui (plot)
                                 self.data = DataContainer::default();
                                 self.show_warning_window = WindowFeedback::None;
@@ -580,7 +631,10 @@ impl MyApp {
                             }
                         }
                         egui::ComboBox::from_id_source("Baud Rate")
-                            .selected_text(format!("{}", self.serial_devices.devices[self.device_idx].baud_rate))
+                            .selected_text(format!(
+                                "{}",
+                                self.serial_devices.devices[self.device_idx].baud_rate
+                            ))
                             .width(80.0)
                             .show_ui(ui, |ui| {
                                 if self.connected_to_device {
@@ -594,14 +648,20 @@ impl MyApp {
                                     );
                                 });
                             });
-                        let connect_text = if self.connected_to_device { "Disconnect" } else { "Connect" };
+                        let connect_text = if self.connected_to_device {
+                            "Disconnect"
+                        } else {
+                            "Connect"
+                        };
                         if ui.button(connect_text).clicked() {
                             if let Ok(mut device) = self.device_lock.write() {
                                 if self.connected_to_device {
                                     device.name.clear();
                                 } else {
-                                    device.name = self.serial_devices.devices[self.device_idx].name.clone();
-                                    device.baud_rate = self.serial_devices.devices[self.device_idx].baud_rate;
+                                    device.name =
+                                        self.serial_devices.devices[self.device_idx].name.clone();
+                                    device.baud_rate =
+                                        self.serial_devices.devices[self.device_idx].baud_rate;
                                 }
                             }
                         }
@@ -621,46 +681,130 @@ impl MyApp {
                             ui.disable();
                         }
                         egui::ComboBox::from_id_source("Data Bits")
-                            .selected_text(self.serial_devices.devices[self.device_idx].data_bits.to_string())
+                            .selected_text(
+                                self.serial_devices.devices[self.device_idx]
+                                    .data_bits
+                                    .to_string(),
+                            )
                             .width(30.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].data_bits, DataBits::Eight, DataBits::Eight.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].data_bits, DataBits::Seven, DataBits::Seven.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].data_bits, DataBits::Six, DataBits::Six.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].data_bits, DataBits::Five, DataBits::Five.to_string());
-
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].data_bits,
+                                    DataBits::Eight,
+                                    DataBits::Eight.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].data_bits,
+                                    DataBits::Seven,
+                                    DataBits::Seven.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].data_bits,
+                                    DataBits::Six,
+                                    DataBits::Six.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].data_bits,
+                                    DataBits::Five,
+                                    DataBits::Five.to_string(),
+                                );
                             });
                         egui::ComboBox::from_id_source("Parity")
-                            .selected_text(self.serial_devices.devices[self.device_idx].parity.to_string())
+                            .selected_text(
+                                self.serial_devices.devices[self.device_idx]
+                                    .parity
+                                    .to_string(),
+                            )
                             .width(30.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].parity, Parity::None, Parity::None.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].parity, Parity::Odd, Parity::Odd.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].parity, Parity::Even, Parity::Even.to_string());
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].parity,
+                                    Parity::None,
+                                    Parity::None.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].parity,
+                                    Parity::Odd,
+                                    Parity::Odd.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].parity,
+                                    Parity::Even,
+                                    Parity::Even.to_string(),
+                                );
                             });
                         egui::ComboBox::from_id_source("Stop Bits")
-                            .selected_text(self.serial_devices.devices[self.device_idx].stop_bits.to_string())
+                            .selected_text(
+                                self.serial_devices.devices[self.device_idx]
+                                    .stop_bits
+                                    .to_string(),
+                            )
                             .width(30.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].stop_bits, StopBits::One, StopBits::One.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].stop_bits, StopBits::Two, StopBits::Two.to_string());
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].stop_bits,
+                                    StopBits::One,
+                                    StopBits::One.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].stop_bits,
+                                    StopBits::Two,
+                                    StopBits::Two.to_string(),
+                                );
                             });
                         egui::ComboBox::from_id_source("Flow Control")
-                            .selected_text(self.serial_devices.devices[self.device_idx].flow_control.to_string())
+                            .selected_text(
+                                self.serial_devices.devices[self.device_idx]
+                                    .flow_control
+                                    .to_string(),
+                            )
                             .width(75.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].flow_control, FlowControl::None, FlowControl::None.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].flow_control, FlowControl::Hardware, FlowControl::Hardware.to_string());
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].flow_control, FlowControl::Software, FlowControl::Software.to_string());
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].flow_control,
+                                    FlowControl::None,
+                                    FlowControl::None.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].flow_control,
+                                    FlowControl::Hardware,
+                                    FlowControl::Hardware.to_string(),
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].flow_control,
+                                    FlowControl::Software,
+                                    FlowControl::Software.to_string(),
+                                );
                             });
                         egui::ComboBox::from_id_source("Timeout")
-                            .selected_text(self.serial_devices.devices[self.device_idx].timeout.as_millis().to_string())
+                            .selected_text(
+                                self.serial_devices.devices[self.device_idx]
+                                    .timeout
+                                    .as_millis()
+                                    .to_string(),
+                            )
                             .width(55.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].timeout, Duration::from_millis(0), "0");
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].timeout, Duration::from_millis(10), "10");
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].timeout, Duration::from_millis(100), "100");
-                                ui.selectable_value(&mut self.serial_devices.devices[self.device_idx].timeout, Duration::from_millis(1000), "1000");
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].timeout,
+                                    Duration::from_millis(0),
+                                    "0",
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].timeout,
+                                    Duration::from_millis(10),
+                                    "10",
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].timeout,
+                                    Duration::from_millis(100),
+                                    "100",
+                                );
+                                ui.selectable_value(
+                                    &mut self.serial_devices.devices[self.device_idx].timeout,
+                                    Duration::from_millis(1000),
+                                    "1000",
+                                );
                             });
                     });
 
@@ -671,143 +815,116 @@ impl MyApp {
                         .spacing(Vec2 { x: 10.0, y: 10.0 })
                         .striped(true)
                         .show(ui, |ui| {
-                            ui.label("Plotting range [#]: ");
-
-                            let window_fmt = |val: f64, _range: RangeInclusive<usize>| {
-                                if val != usize::MAX as f64 {
-                                    val.to_string()
-                                } else {
-                                    "∞".to_string()
-                                }
-                            };
-
                             ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut self.plotting_range)
-                                    .custom_formatter(window_fmt))
-                                    .on_hover_text("Select a window of the last datapoints to be displayed in the plot.");
-                                if ui.button("Full Dataset")
-                                    .on_hover_text("Show the full dataset.")
-                                    .clicked() {
-                                    self.plotting_range = usize::MAX;
-                                }
+                                ui.add_space(100.0);
+                                ui.add(egui::widgets::Button::new(egui::RichText::new(
+                                    "点击搜寻空腔谐振状态",
+                                )));
                             });
                             ui.end_row();
-                            ui.label("Number of plots [#]: ");
 
                             ui.horizontal(|ui| {
-                                if ui.button(egui::RichText::new(egui_phosphor::regular::ARROW_FAT_LEFT.to_string())).clicked() {
-                                    self.serial_devices.number_of_plots[self.device_idx] =
-                                        (self.serial_devices.number_of_plots[self.device_idx] - 1).clamp(1, 10);
-                                }
-                                ui.add(egui::DragValue::new(&mut self.serial_devices.number_of_plots[self.device_idx])
-                                    .range(1..=10))
-                                    .on_hover_text("Select the number of plots to be shown.");
-                                if ui.button(egui::RichText::new(egui_phosphor::regular::ARROW_FAT_RIGHT.to_string())).clicked() {
-                                    self.serial_devices.number_of_plots[self.device_idx] =
-                                        (self.serial_devices.number_of_plots[self.device_idx] + 1).clamp(1, 10);
-                                }
+                                ui.label("空腔谐振频率(MHz): ");
+                                ui.add_space(112.0);
+                                ui.label(format!("{}", self.empty_freq));
                             });
-
-                            ui.end_row();
-                            ui.label("Show Sent Commands");
-                            ui.add(toggle(&mut self.show_sent_cmds))
-                                .on_hover_text("Show sent commands in console.");
-                            ui.end_row();
-                            ui.label("Show Timestamp");
-                            ui.add(toggle(&mut self.show_timestamps))
-                                .on_hover_text("Show timestamp in console.");
-                            ui.end_row();
-                            ui.label("EOL character");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.eol)
-                                    .desired_width(ui.available_width() * 0.9))
-                                .on_hover_text("Configure your EOL character for sent commands..");
-                            // ui.checkbox(&mut self.gui_conf.debug, "Debug Mode");
-                            ui.end_row();
                             ui.end_row();
 
-                            if ui.button(egui::RichText::new(format!("{} Save CSV", egui_phosphor::regular::FLOPPY_DISK)))
-                                .on_hover_text("Save Plot Data to CSV.")
-                                .clicked() || ui.input_mut(|i| i.consume_shortcut(&SAVE_FILE_SHORTCUT))
-                            {
-                                if let Some(path) = rfd::FileDialog::new().save_file() {
-                                    self.picked_path = path;
-                                    self.picked_path.set_extension("csv");
-                                    if let Err(e) = self.save_tx.send(FileOptions {
-                                        file_path: self.picked_path.clone(),
-                                        save_absolute_time: self.gui_conf.save_absolute_time,
-                                        save_raw_traffic: self.save_raw,
-                                    }) {
-                                        print_to_console(
-                                            &self.print_lock,
-                                            Print::Error(format!(
-                                                "save_tx thread send failed: {:?}",
-                                                e
-                                            )),
-                                        );
+                            ui.horizontal(|ui| {
+                                ui.label("空腔Q值: ");
+                                ui.add_space(177.0);
+                                ui.label(format!("{}", self.empty_qv));
+                            });
+                            ui.end_row();
+                            ui.horizontal(|ui| {
+                                ui.add_space(120.0);
+                                ui.label("样品信息");
+                            });
+                            ui.end_row();
+                            ui.horizontal(|ui| {
+                                ui.label("样品名称: ");
+                                ui.add_space(63.0);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.sample_name)
+                                        .hint_text("输入样品名称"),
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品尺寸(mm): ");
+                                ui.add_space(30.0);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.sample_size)
+                                        .hint_text("输入样品尺寸"),
+                                )
+                                .on_hover_text(
+                                    "片状样品输入厚底，棒状样品输入直径，其他样品输入体积",
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(100.0);
+                                ui.add(egui::widgets::Button::new(egui::RichText::new(
+                                    "点击搜寻样品谐振状态",
+                                )));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品谐振频率(MHz): ");
+                                ui.add_space(112.0);
+                                ui.label(format!("{}", self.sample_freq));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品Q值: ");
+                                ui.add_space(177.0);
+                                ui.label(format!("{}", self.sample_qv));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.select_cal_path)
+                                        .hint_text("                      未指定计算程序"),
+                                );
+                                ui.add_space(5.0);
+                                if ui
+                                    .button("选择")
+                                    .on_hover_text("选择对应计算程序")
+                                    .clicked()
+                                {
+                                    if let Some(path) = rfd::FileDialog::new()
+                                        .add_filter("calculate", &["exe"])
+                                        .pick_file()
+                                    {
+                                        self.select_cal_path = path.display().to_string();
                                     }
                                 }
-                            };
-
-                            if ui
-                                .button(egui::RichText::new(format!("{} Save Plot", egui_phosphor::regular::FLOPPY_DISK)))
-                                .on_hover_text("Save an image of the Plot.")
-                                .clicked() || ui.input_mut(|i| i.consume_shortcut(&SAVE_PLOT_SHORTCUT))
-
-                            {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
-                            }
+                            });
                             ui.end_row();
-                            if ui.button(egui::RichText::new(format!("{} Clear Data", egui_phosphor::regular::X)))
-                                .on_hover_text("Clear Data from Plot.")
-                                .clicked() || ui.input_mut(|i| i.consume_shortcut(&CLEAR_PLOT_SHORTCUT)) {
-                                print_to_console(
-                                    &self.print_lock,
-                                    Print::Ok("Cleared recorded Data".to_string()),
-                                );
-                                if let Err(err) = self.clear_tx.send(true) {
-                                    print_to_console(
-                                        &self.print_lock,
-                                        Print::Error(format!(
-                                            "clear_tx thread send failed: {:?}",
-                                            err
-                                        )),
-                                    );
-                                }
-                                // need to clear the data here in order to prevent errors in the gui (plot)
-                                self.data = DataContainer::default();
-                                self.names_tx.send(self.serial_devices.labels[self.device_idx].clone()).expect("Failed to send names");
 
-                            }
+                            ui.horizontal(|ui| {
+                                ui.label("样品介电常数: ");
+                                ui.add_space(150.0);
+                                ui.label(format!("{}", self.sample_dk));
+                            });
                             ui.end_row();
-                            ui.label("Save Raw Traffic");
-                            ui.add(toggle(&mut self.save_raw))
-                                .on_hover_text("Save second CSV containing raw traffic.")
-                                .changed();
-                            ui.end_row();
-                            ui.label("Save Absolute Time");
-                            ui.add(toggle(&mut self.gui_conf.save_absolute_time))
-                                .on_hover_text("Save absolute time in CSV.");
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品介电损耗: ");
+                                ui.add_space(150.0);
+                                ui.label(format!("{}", self.sample_df));
+                            });
                             ui.end_row();
                         });
-                    ui.add_space(25.0);
-                    if ui.add(ThemeSwitch::new(&mut self.gui_conf.theme_preference)).changed() {
-                        // do nothing, for now...
-                    };
-                    // always set dark mode
-                    let theme = match self.gui_conf.theme_preference {
-                        ThemePreference::Dark => Theme::Dark,
-                        ThemePreference::Light => Theme::Light,
-                        ThemePreference::System => {let eframe_system_theme = frame.info().system_theme;
-                            eframe_system_theme
-                                .unwrap_or(Theme::Dark)}
-                    };
-                    ctx.set_visuals(theme.egui_visuals());
-                    ctx.send_viewport_cmd(ViewportCommand::SetTheme(self.gui_conf.theme_preference.into()));
 
                     ui.add_space(25.0);
                     self.gui_conf.dark_mode = ui.visuals() == &Visuals::dark();
-                    ui.horizontal( |ui| {
+                    ui.horizontal(|ui| {
                         if ui.button("Clear Device History").clicked() {
                             self.serial_devices = SerialDevices::default();
                             self.device.clear();
@@ -827,23 +944,54 @@ impl MyApp {
                     for i in 0..self.data.names.len().min(10) {
                         // if init, set names to what has been stored in the device last time
                         if init {
-                            self.names_tx.send(self.serial_devices.labels[self.device_idx].clone()).expect("Failed to send names");
+                            self.names_tx
+                                .send(self.serial_devices.labels[self.device_idx].clone())
+                                .expect("Failed to send names");
                             init = false;
                         }
                         if self.serial_devices.labels[self.device_idx].len() <= i {
                             break;
                         }
 
-                        if ui.add(
-                            egui::TextEdit::singleline(&mut self.serial_devices.labels[self.device_idx][i])
-                                .desired_width(0.95 * RIGHT_PANEL_WIDTH)
-                        ).on_hover_text("Use custom names for your Datasets.").changed() {
-                            self.names_tx.send(self.serial_devices.labels[self.device_idx].clone()).expect("Failed to send names");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(
+                                    &mut self.serial_devices.labels[self.device_idx][i],
+                                )
+                                .desired_width(0.95 * RIGHT_PANEL_WIDTH),
+                            )
+                            .on_hover_text("Use custom names for your Datasets.")
+                            .changed()
+                        {
+                            self.names_tx
+                                .send(self.serial_devices.labels[self.device_idx].clone())
+                                .expect("Failed to send names");
                         };
                     }
                     if self.data.names.len() > 10 {
                         ui.label("Only renaming up to 10 Datasets is currently supported.");
                     }
+
+                    ui.add_space(25.0);
+                    if ui
+                        .add(ThemeSwitch::new(&mut self.gui_conf.theme_preference))
+                        .changed()
+                    {
+                        // do nothing, for now...
+                    };
+                    // always set dark mode
+                    let theme = match self.gui_conf.theme_preference {
+                        ThemePreference::Dark => Theme::Dark,
+                        ThemePreference::Light => Theme::Light,
+                        ThemePreference::System => {
+                            let eframe_system_theme = frame.info().system_theme;
+                            eframe_system_theme.unwrap_or(Theme::Dark)
+                        }
+                    };
+                    ctx.set_visuals(theme.egui_visuals());
+                    ctx.send_viewport_cmd(ViewportCommand::SetTheme(
+                        self.gui_conf.theme_preference.into(),
+                    ));
                 });
 
                 if let Ok(read_guard) = self.print_lock.read() {
