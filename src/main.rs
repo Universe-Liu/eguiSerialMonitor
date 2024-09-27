@@ -189,6 +189,7 @@ fn main() {
             .with_drag_and_drop(true)
             .with_inner_size(vec2(gui_settings.x, gui_settings.y))
             .with_min_inner_size(vec2(2.0 * RIGHT_PANEL_WIDTH, 2.0 * RIGHT_PANEL_WIDTH))
+            .with_max_inner_size(vec2(4.0 * RIGHT_PANEL_WIDTH, 2.0 * RIGHT_PANEL_WIDTH))
             .with_icon(
                 icon_data::from_png_bytes(&include_bytes!("../icons/icon.png")[..]).unwrap(),
             ),

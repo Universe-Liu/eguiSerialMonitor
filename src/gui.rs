@@ -25,7 +25,7 @@ use crate::{APP_INFO, PREFS_KEY};
 const MAX_FPS: f64 = 60.0;
 
 const DEFAULT_FONT_ID: FontId = FontId::new(14.0, FontFamily::Monospace);
-pub const RIGHT_PANEL_WIDTH: f32 = 350.0;
+pub const RIGHT_PANEL_WIDTH: f32 = 355.0;
 const BAUD_RATES: &[u32] = &[
     300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 230400, 128000, 460800,
     576000, 921600,
@@ -351,16 +351,15 @@ impl MyApp {
     }
 
     fn draw_central_panel(&mut self, ctx: &egui::Context) {
-        load_global_font(&ctx);
+        load_global_font(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             let left_border = 10.0;
 
             let panel_height = ui.available_size().y;
             let height = ui.available_size().y * self.plot_serial_display_ratio;
             let plots_height = height;
-            // need to subtract 12.0, this seems to be the height of the separator of two adjacent plots
-            let plot_height =
-                plots_height / (self.serial_devices.number_of_plots[self.device_idx] as f32) - 12.0;
+            // 由于现在只有一个图表，这里不需要减去分隔符的高度
+            let plot_height = plots_height;
             let top_spacing = 5.0;
             let width = ui.available_size().x - 2.0 * left_border - RIGHT_PANEL_WIDTH;
 
@@ -372,77 +371,42 @@ impl MyApp {
                         self.data = read_guard.clone();
                     }
 
-                    let mut graphs: Vec<Vec<PlotPoint>> = vec![vec![]; self.data.dataset.len()];
+                    let mut graph: Vec<PlotPoint> = vec![];
                     let window = self.data.dataset[0]
                         .len()
                         .saturating_sub(self.plotting_range);
 
                     for (i, time) in self.data.time[window..].iter().enumerate() {
                         let x = *time as f64 / 1000.0;
-                        for (graph, data) in graphs.iter_mut().zip(&self.data.dataset) {
-                            if self.data.time.len() == data.len() {
-                                if let Some(y) = data.get(i + window) {
-                                    graph.push(PlotPoint { x, y: *y as f64 });
-                                }
-                            }
+                        if let Some(y) = self.data.dataset[0].get(i + window) {
+                            graph.push(PlotPoint { x, y: *y as f64 });
                         }
                     }
 
                     let t_fmt =
                         |x: GridMark, _range: &RangeInclusive<f64>| format!("{:4.2} s", x.value);
 
-                    let plots_ui = ui.vertical(|ui| {
-                        for graph_idx in 0..self.serial_devices.number_of_plots[self.device_idx] {
-                            if graph_idx != 0 {
-                                ui.separator();
-                            }
+                    let plot_ui = ui.vertical(|ui| {
+                        let signal_plot = Plot::new("data-0")
+                            .height(plot_height)
+                            .width(width)
+                            .legend(Legend::default())
+                            .x_grid_spacer(log_grid_spacer(10))
+                            .y_grid_spacer(log_grid_spacer(10))
+                            .x_axis_formatter(t_fmt);
 
-                            let signal_plot = Plot::new(format!("data-{graph_idx}"))
-                                .height(plot_height)
-                                .width(width)
-                                .legend(Legend::default())
-                                .x_grid_spacer(log_grid_spacer(10))
-                                .y_grid_spacer(log_grid_spacer(10))
-                                .x_axis_formatter(t_fmt);
+                        let plot_inner = signal_plot.show(ui, |signal_plot_ui| {
+                            signal_plot_ui.line(
+                                Line::new(PlotPoints::Owned(graph.to_vec()))
+                                    .name(&self.serial_devices.labels[0]),
+                            );
+                        });
 
-                            let plot_inner = signal_plot.show(ui, |signal_plot_ui| {
-                                for (i, graph) in graphs.iter().enumerate() {
-                                    // this check needs to be here for when we change devices (not very elegant)
-                                    if i < self.serial_devices.labels[self.device_idx].len() {
-                                        signal_plot_ui.line(
-                                            Line::new(PlotPoints::Owned(graph.to_vec())).name(
-                                                &self.serial_devices.labels[self.device_idx][i],
-                                            ),
-                                        );
-                                    }
-                                }
-                            });
-
-                            self.plot_location = Some(plot_inner.response.rect);
-                        }
-                        let separator_response = ui.separator();
-                        let separator = ui
-                            .interact(
-                                separator_response.rect,
-                                separator_response.id,
-                                Sense::click_and_drag(),
-                            )
-                            .on_hover_cursor(egui::CursorIcon::ResizeVertical);
-
-                        let resize_y = separator.drag_delta().y;
-
-                        if separator.double_clicked() {
-                            self.plot_serial_display_ratio = 0.45;
-                        }
-                        self.plot_serial_display_ratio = (self.plot_serial_display_ratio
-                            + resize_y / panel_height)
-                            .clamp(0.1, 0.9);
-
-                        ui.add_space(top_spacing);
+                        self.plot_location = Some(plot_inner.response.rect);
                     });
 
                     let serial_height = panel_height
-                        - plots_ui.response.rect.height()
+                        - plot_ui.response.rect.height()
                         - left_border * 2.0
                         - top_spacing;
 
@@ -482,7 +446,46 @@ impl MyApp {
                                     .desired_width(width),
                             );
                         });
-                    ctx.request_repaint()
+                    ui.add_space(top_spacing / 2.0);
+                    ui.horizontal(|ui| {
+                        let cmd_line = ui.add(
+                            egui::TextEdit::singleline(&mut self.command)
+                                .desired_width(width - 50.0)
+                                .lock_focus(true)
+                                .code_editor(),
+                        );
+                        let cmd_has_lost_focus = cmd_line.lost_focus();
+                        let key_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if (key_pressed && cmd_has_lost_focus) || ui.button("Send").clicked() {
+                            // send command
+                            self.history.push(self.command.clone());
+                            self.index = self.history.len() - 1;
+                            let eol = self.eol.replace("\\r", "\r").replace("\\n", "\n");
+                            if let Err(err) = self.send_tx.send(self.command.clone() + &eol) {
+                                print_to_console(
+                                    &self.print_lock,
+                                    Print::Error(format!("send_tx thread send failed: {:?}", err)),
+                                );
+                            }
+                            // stay in focus!
+                            cmd_line.request_focus();
+                        }
+                    });
+
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                        self.index = self.index.saturating_sub(1);
+                        if !self.history.is_empty() {
+                            self.command = self.history[self.index].clone();
+                        }
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                        self.index = std::cmp::min(self.index + 1, self.history.len() - 1);
+                        if !self.history.is_empty() {
+                            self.command = self.history[self.index].clone();
+                        }
+                    }
+
+                    ctx.request_repaint();
                 });
                 ui.add_space(left_border);
             });
@@ -490,7 +493,6 @@ impl MyApp {
     }
 
     fn draw_side_panel(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let mut init = false;
         egui::SidePanel::new(Side::Right, "settings panel")
             .min_width(RIGHT_PANEL_WIDTH)
             .max_width(RIGHT_PANEL_WIDTH)
@@ -550,47 +552,6 @@ impl MyApp {
                                 }
                             }
                         });
-                        match self.show_warning_window {
-                            WindowFeedback::None => {}
-                            WindowFeedback::Waiting => {
-                                self.show_warning_window = self.clear_warning_window(ctx);
-                            }
-                            WindowFeedback::Clear => {
-                                // new device selected, check in previously used devices
-                                let mut device_is_already_saved = false;
-                                for (idx, dev) in self.serial_devices.devices.iter().enumerate() {
-                                    if dev.name == self.device {
-                                        // this is the device!
-                                        self.device = dev.name.clone();
-                                        self.device_idx = idx;
-                                        init = true;
-                                        device_is_already_saved = true;
-                                    }
-                                }
-                                if !device_is_already_saved {
-                                    // create new device in the archive
-                                    let mut device = Device::default();
-                                    device.name = self.device.clone();
-                                    self.serial_devices.devices.push(device);
-                                    self.serial_devices.number_of_plots.push(1);
-                                    self.serial_devices
-                                        .labels
-                                        .push(vec!["Column 0".to_string()]);
-                                    self.device_idx = self.serial_devices.devices.len() - 1;
-                                    save_serial_settings(&self.serial_devices);
-                                }
-                                self.clear_tx
-                                    .send(true)
-                                    .expect("failed to send clear after choosing new device");
-                                // need to clear the data here such that we don't get errors in the gui (plot)
-                                self.data = DataContainer::default();
-                                self.show_warning_window = WindowFeedback::None;
-                            }
-                            WindowFeedback::Cancel => {
-                                self.device = self.old_device.clone();
-                                self.show_warning_window = WindowFeedback::None;
-                            }
-                        }
                         let connect_text = if self.connected_to_device {
                             "关闭连接"
                         } else {
@@ -601,106 +562,20 @@ impl MyApp {
                                 if self.connected_to_device {
                                     device.name.clear();
                                 } else {
-                                    device.name =
-                                        self.serial_devices.devices[self.device_idx].name.clone();
-                                    device.baud_rate =
-                                        self.serial_devices.devices[self.device_idx].baud_rate;
+                                    device.name = self.serial_devices.device.name.clone();
+                                    device.baud_rate = self.serial_devices.device.baud_rate;
                                 }
                             }
                         }
                     });
                     ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        ui.label("起始扫描频率: ");
-                        ui.add_space(63.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.start_freq)
-                                .hint_text("MHz,输入起始频率"),
-                        );
-                    });
-                    ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        ui.label("截至扫描频率: ");
-                        ui.add_space(63.0);
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.start_freq)
-                                .hint_text("MHz,输入截至频率"),
-                        );
-                    });
-                    ui.add_space(10.0);
 
                     egui::Grid::new("upper")
                         .num_columns(2)
                         .spacing(Vec2 { x: 10.0, y: 10.0 })
                         .striped(true)
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add_space(90.0);
-                                ui.add(egui::widgets::Button::new(egui::RichText::new(
-                                    "点击搜寻空腔谐振状态",
-                                )));
-                            });
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.label("空腔谐振频率(MHz): ");
-                                ui.add_space(112.0);
-                                ui.label(format!("{}", self.empty_freq));
-                            });
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.label("空腔Q值: ");
-                                ui.add_space(177.0);
-                                ui.label(format!("{}", self.empty_qv));
-                            });
-                            ui.end_row();
-                            ui.end_row();
-                            ui.heading("样品信息");
-                            ui.end_row();
-                            ui.horizontal(|ui| {
-                                ui.label("样品名称: ");
-                                ui.add_space(63.0);
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.sample_name)
-                                        .hint_text("输入样品名称"),
-                                );
-                            });
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.label("样品尺寸(mm): ");
-                                ui.add_space(30.0);
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.sample_size)
-                                        .hint_text("输入样品尺寸"),
-                                )
-                                .on_hover_text(
-                                    "片状样品输入厚底，棒状样品输入直径，其他样品输入体积",
-                                );
-                            });
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.add_space(90.0);
-                                ui.add(egui::widgets::Button::new(egui::RichText::new(
-                                    "点击搜寻样品谐振状态",
-                                )));
-                            });
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.label("样品谐振频率(MHz): ");
-                                ui.add_space(112.0);
-                                ui.label(format!("{}", self.sample_freq));
-                            });
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.label("样品Q值: ");
-                                ui.add_space(177.0);
-                                ui.label(format!("{}", self.sample_qv));
-                            });
+                            ui.heading("参数设置");
                             ui.end_row();
 
                             ui.horizontal(|ui| {
@@ -725,69 +600,135 @@ impl MyApp {
                             ui.end_row();
 
                             ui.horizontal(|ui| {
-                                ui.label("样品介电常数: ");
+                                ui.label("起始扫描频率 ");
+                                ui.add_space(63.0);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.start_freq)
+                                        .hint_text("MHz,输入起始频率"),
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("截至扫描频率 ");
+                                ui.add_space(63.0);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.end_freq)
+                                        .hint_text("MHz,输入截至频率"),
+                                );
+                            });
+                            ui.end_row();
+                            ui.separator();
+                            ui.end_row();
+
+                            ui.heading("谐振扫描");
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("空腔谐振频率(MHz) ");
+                                ui.add_space(112.0);
+                                ui.label(format!("{}", self.empty_freq));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("空腔Q值 ");
+                                ui.add_space(177.0);
+                                ui.label(format!("{}", self.empty_qv));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(90.0);
+                                ui.add(egui::widgets::Button::new(egui::RichText::new(
+                                    "点击搜寻空腔谐振状态",
+                                )));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品谐振频率(MHz) ");
+                                ui.add_space(112.0);
+                                ui.label(format!("{}", self.sample_freq));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品Q值 ");
+                                ui.add_space(177.0);
+                                ui.label(format!("{}", self.sample_qv));
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(90.0);
+                                ui.add(egui::widgets::Button::new(egui::RichText::new(
+                                    "点击搜寻样品谐振状态",
+                                )));
+                            });
+                            ui.end_row();
+
+                            ui.separator();
+                            ui.end_row();
+
+                            ui.heading("样品信息");
+                            ui.end_row();
+                            ui.horizontal(|ui| {
+                                ui.label("样品名称 ");
+                                ui.add_space(93.0);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.sample_name)
+                                        .hint_text("输入样品名称"),
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品尺寸(mm) ");
+                                ui.add_space(60.0);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.sample_size)
+                                        .hint_text("输入样品尺寸"),
+                                )
+                                .on_hover_text(
+                                    "片状样品输入厚底，棒状样品输入直径，其他样品输入体积",
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.label("样品介电常数 ");
                                 ui.add_space(150.0);
                                 ui.label(format!("{}", self.sample_dk));
                             });
                             ui.end_row();
 
                             ui.horizontal(|ui| {
-                                ui.label("样品介电损耗: ");
+                                ui.label("样品介电损耗 ");
                                 ui.add_space(150.0);
                                 ui.label(format!("{}", self.sample_df));
                             });
                             ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(120.0);
+                                ui.add(egui::widgets::Button::new(egui::RichText::new("计算")));
+                                ui.add_space(10.0);
+                                ui.add(egui::widgets::Button::new(egui::RichText::new("保存")));
+                            });
+                            ui.end_row();
+
+                            ui.separator();
+                            ui.end_row();
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(40.0);
+                                ui.label("版权所有：©西安交通大学功能材料研究中心");
+                            });
+                            ui.end_row();
                         });
 
-                    ui.add_space(25.0);
                     self.gui_conf.dark_mode = ui.visuals() == &Visuals::dark();
-                    ui.horizontal(|ui| {
-                        if ui.button("Clear Device History").clicked() {
-                            self.serial_devices = SerialDevices::default();
-                            self.device.clear();
-                            self.device_idx = 0;
-                            clear_serial_settings();
-                        }
-                        if ui.button("Reset Labels").clicked() {
-                            self.serial_devices.labels[self.device_idx] = self.data.names.clone();
-                        }
-                    });
-                    if self.data.names.len() == 1 {
-                        ui.label("Detected 1 Dataset:");
-                    } else {
-                        ui.label(format!("Detected {} Datasets:", self.data.names.len()));
-                    }
-                    ui.add_space(5.0);
-                    for i in 0..self.data.names.len().min(10) {
-                        // if init, set names to what has been stored in the device last time
-                        if init {
-                            self.names_tx
-                                .send(self.serial_devices.labels[self.device_idx].clone())
-                                .expect("Failed to send names");
-                            init = false;
-                        }
-                        if self.serial_devices.labels[self.device_idx].len() <= i {
-                            break;
-                        }
-
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(
-                                    &mut self.serial_devices.labels[self.device_idx][i],
-                                )
-                                .desired_width(0.95 * RIGHT_PANEL_WIDTH),
-                            )
-                            .on_hover_text("Use custom names for your Datasets.")
-                            .changed()
-                        {
-                            self.names_tx
-                                .send(self.serial_devices.labels[self.device_idx].clone())
-                                .expect("Failed to send names");
-                        };
-                    }
-                    if self.data.names.len() > 10 {
-                        ui.label("Only renaming up to 10 Datasets is currently supported.");
-                    }
 
                     ui.add_space(25.0);
                     if ui
@@ -810,38 +751,6 @@ impl MyApp {
                         self.gui_conf.theme_preference.into(),
                     ));
                 });
-
-                if let Ok(read_guard) = self.print_lock.read() {
-                    self.console = read_guard.clone();
-                }
-                let num_rows = self.console.len();
-                let row_height = ui.text_style_height(&egui::TextStyle::Body);
-
-                ui.add_space(20.0);
-                ui.separator();
-                ui.label("Debug Info:");
-                ui.add_space(5.0);
-                egui::ScrollArea::vertical()
-                    .id_source("console_scroll_area")
-                    .auto_shrink([false; 2])
-                    .stick_to_bottom(true)
-                    .max_height(row_height * 15.5)
-                    .show_rows(ui, row_height, num_rows, |ui, _row_range| {
-                        let content: String = self
-                            .console
-                            .iter()
-                            .flat_map(|row| row.scroll_area_message(&self.gui_conf))
-                            .map(|msg| msg.label + msg.content.as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        // we need to add it as one multiline object, such that we can select and copy
-                        // text over multiple lines
-                        ui.add(
-                            egui::TextEdit::multiline(&mut content.as_str())
-                                .font(DEFAULT_FONT_ID) // for cursor height
-                                .lock_focus(true), // TODO: add a layouter to highlight the labels
-                        );
-                    });
             });
     }
 
