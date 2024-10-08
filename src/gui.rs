@@ -7,18 +7,16 @@ use std::time::Duration;
 
 use eframe::egui::panel::Side;
 use eframe::egui::{
-    Align2, FontFamily, FontId, KeyboardShortcut, Pos2, Sense, Vec2, ViewportCommand, Visuals,
+    Align2, FontFamily, FontId, KeyboardShortcut, Pos2, Vec2, ViewportCommand, Visuals,
 };
 use eframe::{egui, Storage, Theme};
 use egui_plot::{log_grid_spacer, GridMark, Legend, Line, Plot, PlotPoint, PlotPoints};
 use egui_theme_switch::{ThemePreference, ThemeSwitch};
 use preferences::Preferences;
 use serde::{Deserialize, Serialize};
-use serialport::{DataBits, FlowControl, Parity, StopBits};
 
 use crate::data::{DataContainer, SerialDirection};
-use crate::serial::{clear_serial_settings, save_serial_settings, Device, SerialDevices};
-use crate::toggle::toggle;
+use crate::serial::{save_serial_settings, Device, SerialDevices};
 use crate::FileOptions;
 use crate::{APP_INFO, PREFS_KEY};
 

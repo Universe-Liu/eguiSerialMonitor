@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -62,7 +63,7 @@ impl Default for Device {
     fn default() -> Self {
         Device {
             name: "".to_string(),
-            baud_rate: 9600,
+            baud_rate: 115200,
             data_bits: DataBits::Eight,
             flow_control: FlowControl::None,
             parity: Parity::None,
@@ -89,6 +90,9 @@ fn serial_read(
 
 pub fn serial_thread(
     send_rx: Receiver<String>,
+    // start_sweep: Arc<AtomicI64>,
+    // stop_sweep: Arc<AtomicI64>,
+    // step_sweep: Arc<AtomicI64>,
     raw_data_tx: Sender<Packet>,
     device_lock: Arc<RwLock<Device>>,
     devices_lock: Arc<RwLock<Vec<String>>>,
@@ -147,6 +151,16 @@ pub fn serial_thread(
             //.app_reverse_domain("io.github.myprog")
             .create();
 
+        // Send start_sweep, stop_sweep, and step_sweep information
+        // let start_sweep_val = start_sweep.load(Ordering::Relaxed);
+        // let stop_sweep_val = stop_sweep.load(Ordering::Relaxed);
+        // let step_sweep_val = step_sweep.load(Ordering::Relaxed);
+        // Send_Msg_Ka(&mut port, start_sweep_val, 0);
+        // Send_Msg_Ka(&mut port, stop_sweep_val, 1);
+        // Send_Msg_Ka(&mut port, step_sweep_val, 2);
+
+        perform_writes(&mut port, &send_rx, &raw_data_tx, t_zero);
+
         'connected_loop: loop {
             let devices = available_devices();
             if let Ok(mut write_guard) = devices_lock.write() {
@@ -158,10 +172,7 @@ pub fn serial_thread(
                 break 'connected_loop;
             }
 
-            perform_writes(&mut port, &send_rx, &raw_data_tx, t_zero);
             perform_reads(&mut port, &raw_data_tx, t_zero);
-
-            //std::thread::sleep(Duration::from_millis(10));
         }
         std::mem::drop(port);
     }
